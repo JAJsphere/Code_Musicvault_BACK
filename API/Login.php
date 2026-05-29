@@ -1,9 +1,12 @@
 <?php
-require __DIR__ . '/../vendor/autoload.php'; // Composer autoload pour JWT
-use \Firebase\JWT\JWT;
-use \Firebase\JWT\Key;
 
-// CORS -> Seuls ces sites ont le droit d'appeler l'API (HTTP et HTTPS comptent comme deux origines différentes)
+
+require __DIR__ . '/../vendor/autoload.php'; // Charge les bibliothèques externes (Composer), sans ça le Token ne fonctionne pas (Composer -> Télécharge la librairie JWT)
+use \Firebase\JWT\JWT; // Permet d’utiliser JWT::encode() et JWT::encode() au lieu de Firebase\JWT\JWT::encode()
+
+
+
+// CORS -> Seuls ces sites ont le droit d'appeler l'API 
 $corsTAB = [
 
     "http://localhost:5173",
@@ -14,6 +17,8 @@ $corsTAB = [
     "https://musicvault.hugoal.fr",
 
 ];
+
+// Autorisation CORS : Si une des URL qui appelle l'API est dans la liste, on autorise les headers
 if (isset($_SERVER['HTTP_ORIGIN']) && in_array($_SERVER['HTTP_ORIGIN'], $corsTAB)) {
     header("Access-Control-Allow-Origin: " . $_SERVER['HTTP_ORIGIN']);
     header("Access-Control-Allow-Methods: POST, PUT, DELETE, PATCH, OPTIONS");
@@ -23,8 +28,8 @@ if (isset($_SERVER['HTTP_ORIGIN']) && in_array($_SERVER['HTTP_ORIGIN'], $corsTAB
 }
 
 
-
-// Pour gérer le preflight CORS
+// Preflight CORS -> Le navigateur envoie toujours une requête OPTIONS avant la vraie requête pour vérifier qu'il a le droit d'appeler l'API
+// On répond juste 200 OK et on coupe, le navigateur envoie ensuite la vraie requête
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
@@ -32,8 +37,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 
 // Récupération des données envoyées par le front (mon login / MDP de ma page front LOGIN)
-$input = json_decode(file_get_contents("php://input"), true);
-$login = $input['login'] ?? '';
+$input = json_decode(file_get_contents("php://input"), true); //  Contient les données brutes envoyées en JSON, et le true dit à json_decode de convertir le JSON en tab associatif PHP
+$login = $input['login'] ?? ''; // Valeur du champ
 $password = $input['password'] ?? '';
 
 
@@ -47,69 +52,63 @@ if (!$login || !$password) {
 
 
 
-// ----------------------------
-// Connexion à la base de données
-// ----------------------------
-require_once "../Classes/CDao.php";  // Inclure la classe
-
-// On créer notre objet pdo pour connexion base
-$dao = new CDao();
-$pdo = $dao->getPdo();
+require_once "../Classes/CDao.php";
+require_once "../Classes/ClassesControle/CUtilisateurs.php";
 
 
-// ----------------------------
-// Vérifier l'utilisateur (pas normal le sql ici)
-// ----------------------------
-$stmt = $pdo->prepare("SELECT idUtilisateur, login, mdpHash, idRole, doitChangerMdp FROM utilisateur WHERE login = :login LIMIT 1");
-$stmt->execute(['login' => $login]); // Remplace login par valeur réelle 
-$user = $stmt->fetch(PDO::FETCH_ASSOC);
+// Fichiers pour lire le .env qui contient la clé du token
+$dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
+$dotenv->load();
+
+$dao = new CDao(); // Crée la connexion à la BDD
+$pdo = $dao->getPdo(); // Récupère l'objet PDO  
 
 
-// Si identifiants ne correspondent pas en base avec ceux entrés -> identifiants incorrects
-if (!$user || !password_verify($password, $user['mdpHash'])) { //password_verify -> Vérifie avec les hashs
+
+
+$cutilisateurs = CUtilisateurs::getInstance($dao); // Récupère l'instance unique de CUtilisateurs
+$user = $cutilisateurs->getUtilisateurByLogin($login); // Récupère l'utilisateur correspondant au login entré
+
+
+// Vérifie que l'utilisateur existe en BDD et que le mot de passe entré correspond au hash stocké
+if (!$user || !password_verify($password, $user->getMdpHash())) { // password_verify -> Compare si le hash du mdp en clair correspond à celui stocké
     http_response_code(401);
     echo json_encode(["success" => false, "message" => "Identifiants incorrects"]);
     exit;
 }
 
+// Et si le mdp est le bon -> L'utilisateur est authentifié, et on peut générer son token JWT
 
 
-// -------------------------------------------
-// Générer le JWT (si utilisateur correspond)
-// -------------------------------------------
-$secret_key = "cebaa9a72e9180eb6ae6eed7f458d79c04e27d33dcc45a0cfe37a92149d81ef4";  // Clé secrète que mon serveur utilise pour signer le token 
-$issuedAt = time();
+// Générer le JWT 
+$secret_key = $_ENV['JWT_SECRET']; // Clé secrète que mon serveur utilise pour signer le token (dans le .env)
+$issuedAt = time(); // Date de création
 $expire = $issuedAt + 3600; // Durée de vie du token (ici 1H)
 
+// Le contenu du token (tab associatif, clé / valeur)
 $payload = [
-    "iat" => $issuedAt,
-    "exp" => $expire,
-    "idUtilisateur" => $user['idUtilisateur'],
-    "login" => $user['login'],
-    "idRole" => $user['idRole'],
-    "doitChangerMdp" => (bool) $user['doitChangerMdp'] // 👈
+    "iat" => $issuedAt, // Date de création
+    "exp" => $expire, // Date d'expiration
+    "idUtilisateur" => $user->getIdUtilisateur(),
+    "login" => $user->getLogin(),
+    "idRole" => $user->getIdRole(),
+    "doitChangerMdp" => (bool) $user->getDoitChangerMdp() // True ou False
 ];
 
+// Fabrication du token final composé du payload, de la clé secrète du serveur (pour signer le token) et de son algo de signature
 $jwt = JWT::encode($payload, $secret_key, 'HS256');
 
-// ----------------------------
-// Réponse au front JSON
-// ----------------------------
+
+// Convertit les données à envoyer au front en JSON
 echo json_encode([
-    "success" => true,
+    "success" => true,   // Indicateur -> connexion réussie ou non
     "token" => $jwt,
-    "idUtilisateur" => $user['idUtilisateur'],
-    "idRole" => $user['idRole'],
-    "login" => $user['login'],
-    "doitChangerMdp" => (bool) $user['doitChangerMdp'] // 👈
+    "idUtilisateur" => $user->getIdUtilisateur(),
+    "login" => $user->getLogin(),
+    "idRole" => $user->getIdRole(),
+    "doitChangerMdp" => (bool) $user->getDoitChangerMdp()
+
+    // On renvoie encore les données utilisateur même si elles sont déjà stockées dans le token pour simplifier l'utilisation côté frontend et éviter au client de devoir décoder le JWT
+
 ]);
 
-
-
-/* ETAPES REALISEES DANS CE FICHIER : 
-- Tu récupères les données envoyées par le front (login + password).
-- Tu vérifies que ces champs ne sont pas vides.
-- Tu récupères l’utilisateur en BDD avec PDO (ou ta classe CDao).
-- Tu vérifies que le mot de passe correspond (password_verify).
-- Tu crées le payload du JWT et tu as la clé secrète. 
-- Génération du TOKEN et envoie de la réponse JSON au front */

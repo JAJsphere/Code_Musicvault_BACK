@@ -2,7 +2,7 @@
 
 // MusiqueActions.php -> CRUD pour les musiques (GET ailleurs)
 
-// CORS -> Seuls ces sites ont le droit d'appeler l'API (HTTP et HTTPS comptent comme deux origines différentes)
+// CORS -> Seuls ces sites ont le droit d'appeler l'API 
 $corsTAB = [
 
     "http://localhost:5173",

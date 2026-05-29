@@ -52,7 +52,7 @@ class CUtilisateur
 
     }
 
-    public function getMdpHash()
+    public function getMdpHash() 
     {
         return $this->mdpHash;
     }

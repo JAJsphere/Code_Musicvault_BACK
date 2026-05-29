@@ -2,7 +2,7 @@
 
 // Musique -> GET des musiques
 
-// CORS -> Seuls ces sites ont le droit d'appeler l'API (HTTP et HTTPS comptent comme deux origines différentes)
+// CORS -> Seuls ces sites ont le droit d'appeler l'API 
 $corsTAB = [
 
     "http://localhost:5173",
@@ -45,9 +45,9 @@ $musiques = $cmusiques->getMusiques(); // Récupère le tableau d'objets CMusiqu
 
 
 
-// --------------------------------------------- //
+
 // -- Préparer les données à renvoyer en JSON -- //
-// --------------------------------------------- //
+
 $dataMusiques = []; // Tableau vide qui va stocker les données à renvoyer en JSON
 
 // Parcourt de chaque objet CMusique
@@ -67,8 +67,10 @@ foreach ($musiques as $m) {
     ];
 }
 
-// On dit au navigateur qu'on renvoie du JSON : 
-header("Content-Type: application/json; charset=utf-8");
 
-// On transforme le tableau PHP en JSON prêt à être utilisé pour le front :
+header("Content-Type: application/json; charset=utf-8"); // Je dis au front que je lui envoie du JSON
+
+// json_encode -> transforme le tableau de tableaux associatifs en JSON    
 echo json_encode($dataMusiques, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+
+// echo -> Envoie les données au front (contexte API, afficher (echo) = envoyer (mis dans la réponse HTTP))

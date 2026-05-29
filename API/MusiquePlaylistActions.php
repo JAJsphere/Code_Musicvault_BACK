@@ -3,7 +3,7 @@
 // MusiquePlaylistActions -> CRUD pour les musiques DANS les playlists (ajouter une musique dans une playlist, supprimer une musique d'une playlist)
 
 
-// CORS -> Seuls ces sites ont le droit d'appeler l'API (HTTP et HTTPS comptent comme deux origines différentes)
+// CORS -> Seuls ces sites ont le droit d'appeler l'API 
 $corsTAB = [
 
     "http://localhost:5173",
