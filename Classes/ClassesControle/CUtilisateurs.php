@@ -83,7 +83,7 @@ class CUtilisateurs
             // Ajout à la collection le nouvel utilisateur créé (synchro de la coll avec la BDD)
             $this->collUtilisateurs[] = $utilisateur;
 
-            return $utilisateur->getIdUtilisateur(); // Si ajout succès -> Return l'id (si on en a besoin après l'appel de la méthode)
+            return $utilisateur->getIdUtilisateur(); // Si ajout succès -> Return l'id 
 
             // Erreur -> Affiche un message d'erreur (au lieu de planter l'application)
         } catch (Exception $e) {

@@ -90,7 +90,7 @@ class CGenres
             // [] -> Ajoute en fin de tableau
 
 
-            return $this->pdo->lastInsertId(); // Retourne l'id du genre créé si ajout réussi (si on en a besoin après l'appel de la méthode)
+            return $this->pdo->lastInsertId(); // Retourne l'id du genre créé si ajout réussi 
 
             // Erreur -> Affiche un message d'erreur (au lieu de planter l'application)
         } catch (Exception $e) {

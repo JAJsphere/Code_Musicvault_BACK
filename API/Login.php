@@ -37,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 
 // Récupération des données envoyées par le front (mon login / MDP de ma page front LOGIN)
-$input = json_decode(file_get_contents("php://input"), true); //  Contient les données brutes envoyées en JSON, et le true dit à json_decode de convertir le JSON en tab associatif PHP
+$input = json_decode(file_get_contents("php://input"), true); // Contient les données envoyées en JSON par le front, et le true dit à json_decode de convertir le JSON en tab associatif PHP
 $login = $input['login'] ?? ''; // Valeur du champ
 $password = $input['password'] ?? '';
 

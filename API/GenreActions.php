@@ -1,6 +1,7 @@
 <?php
 
-// GenreActions -> CRUD pour les genres (pouvoir admin et éditeur)
+// GenreActions.php -> Create, Delete
+// But : Faire l'action en BDD (insérer, supprimer) et prévenir React en renvoyant les données (sauf si erreur)
 
 // CORS -> Seuls ces sites ont le droit d'appeler l'API
 $corsTAB = [
@@ -13,6 +14,7 @@ $corsTAB = [
     "https://musicvault.hugoal.fr",
 
 ];
+// Autorisation CORS : Si une des URL qui appelle l'API est dans la liste, on autorise les headers
 if (isset($_SERVER['HTTP_ORIGIN']) && in_array($_SERVER['HTTP_ORIGIN'], $corsTAB)) {
     header("Access-Control-Allow-Origin: " . $_SERVER['HTTP_ORIGIN']);
     header("Access-Control-Allow-Methods: POST, PUT, DELETE, PATCH,  OPTIONS");
@@ -22,152 +24,117 @@ if (isset($_SERVER['HTTP_ORIGIN']) && in_array($_SERVER['HTTP_ORIGIN'], $corsTAB
 }
 
 
-// Preflight
+// Preflight CORS -> Le navigateur envoie toujours une requête OPTIONS avant la vraie requête pour vérifier qu'il a le droit d'appeler l'API
+// On répond juste 200 OK et on coupe, le navigateur envoie ensuite la vraie requête
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
+// Classes dont on a besoin
 require_once "../Classes/ClassesControle/CGenres.php";
 require_once "../Classes/CGenre.php";
 require_once "../Classes/CDao.php";
-require_once "auth.php"; // Récupère $idUtilisateur et $idRole depuis le JWT
+require_once "auth.php"; // Fichier pour gérer l'authentification et récupérer les infos du JWT (idUtilisateur, role)
 
-$dao = new CDao();
-$cgenres = CGenres::getInstance($dao);
-$cgenres->loadGenres();
+// Initialisation des objets nécessaires pour gérer les genres
+$dao = new CDao(); // Crée la connexion à la BDD
+$cgenres = CGenres::getInstance($dao); // Récupère l'instance unique de la classe CGenres (vide)
+$cgenres->loadGenres(); // On charge la collection depuis la BDD (nécessaire pour vérifier qu'un genre existe déjà avant de l'insérer)
 
+// Récup de la méthode dans le header du front (method : post, delete...)
 $method = $_SERVER['REQUEST_METHOD'];
+
+// Récup des données envoyées par le body du front (pour CREATE)
+// Json_decode va transformer les données JSON en tab assoc php
 $data = json_decode(file_get_contents("php://input"), true);
 
 
 
 
-
-/* ---------------------------------- */
-/* ----------- CREATE GENRE ---------- */
-/* ---------------------------------- */
+// METHOD POST -> Créer un nouveau genre
 if ($method === "POST") {
 
-    // Vérification du rôle : seuls admin (1) et éditeur (2) peuvent créer
-    if (!in_array($idRole, [1, 2])) {
-        echo json_encode([
-            "success" => false,
-            "message" => "Accès refusé : vous n'avez pas le droit de créer un genre"
-        ]);
+    // Vérification du rôle (seuls admin et éditeur peuvent créer un genre)
+    if ($idRole !== 1 && $idRole !== 2) {
+        echo json_encode(["success" => false, "message" => "Accès refusé : vous n'avez pas le droit de créer un genre"]);
         exit;
     }
 
 
-    // Récup valeur envoyé par le front, évite une erreur si rien n'est envoyé, supprime les espaces inutiles
-    $libelle = trim($data["libelle"] ?? "");
-
-
-    // Si le champ est vide -> erreur
-    if ($libelle === "") {
-        echo json_encode([
-            "success" => false,
-            "message" => "Le nom du genre est vide"
-        ]);
-        exit;
-    }
-
-
-    // Vérification insensible à la casse
+    // Vérification -> Empêcher d'insérer un rôle déjà existant en BDD 
+    // Parcourt de tous les genres de la collection
     foreach ($cgenres->getGenres() as $g) {
-        if (strtolower($g->getLibelle()) === strtolower($libelle)) {
-            echo json_encode([
-                "success" => false,
-                "message" => "Ce genre existe déjà"
-            ]);
+
+        // Pour chaque genre existant, on compare avec celui reçu du front (les deux en minuscules)
+        // Si identiques = genre existe déjà -> bloqué
+        if (strtolower($g->getLibelle()) === strtolower($data["libelle"])) {
+
+            echo json_encode(["success" => false, "message" => "Ce genre existe déjà"]);
             exit;
         }
     }
 
+    // On passe en param le libelle récupéré du front dans la méthode addGenre
+    // La ligne insère les données qu'on lui donne dans la BDD (rôle de la méthode)
+    // On stocke tout ça dans "idGenre", car la méthode addGenre renvoie l'id du genre ajouté
+    $idGenre = $cgenres->addGenre($data["libelle"]);
 
-    // On appelle la méthode pour créer le genre en lui donnant le libelle en question
-    $idGenre = $cgenres->addGenre($libelle);
-
-
-    // Si ça marche, on renvoie le genre avec son ID
+    // Si l'insert a réussi
     if ($idGenre) {
+
+        // On renvoie un tableau associatif des données du genre pour que React puisse l'utiliser (indispensable car quand on crée, React ne connait pas l'ID du nouveau genre)
         echo json_encode([
-            "success" => true,
+            "success" => true, // Pour prévenir React que l'ajout en base a réussi
             "genre" => [
-                "idGenre" => $idGenre,
-                "libelle" => $libelle
+                "idGenre" => $idGenre, // Renvoie aussi l'id que React ne possède pas
+                "libelle" => $data["libelle"]
             ]
         ]);
 
-
-        // Sinon -> message d'erreur
+        // Erreur -> L'insertion en base a échoué (récupéré et affiché par React)
     } else {
-        echo json_encode([
-            "success" => false,
-            "message" => "Erreur lors de la création du genre"
-        ]);
+        echo json_encode(["success" => false, "message" => $idGenre]);
     }
 
-
-    exit;
 }
-// --------------------------- //
-// ---- FIN CREATE GENRE ----- //
-// --------------------------- //
 
 
 
 
-
-/* -------------------------------------- */
-/* --- DELETE GENRE + VERIF UTILISATION - */
-/* -------------------------------------- */
+// METHOD DELETE -> Supprimer un genre
 if ($method === "DELETE") {
 
-    // Vérification du rôle : seuls admin (1) et éditeur (2) peuvent supprimer
-    if (!in_array($idRole, [1, 2])) {
-        echo json_encode([
-            "success" => false,
-            "message" => "Accès refusé : vous n'avez pas le droit de supprimer un genre"
-        ]);
+    // Vérification du rôle (seuls admin et éditeur peuvent supprimer un genre)
+    if ($idRole !== 1 && $idRole !== 2) {
+        echo json_encode(["success" => false, "message" => "Accès refusé : vous n'avez pas le droit de supprimer un genre"]);
         exit;
     }
 
-    parse_str($_SERVER["QUERY_STRING"], $params);
-    $idGenre = $params["idGenre"] ?? null;
+    parse_str($_SERVER["QUERY_STRING"], $params); // Récupère l'ID du genre envoyé par React dans l'URL
+    // QUERY_STRING -> C'est la partie après le "?" dans l'URL (donc idGenre=5 par ex)
+    // parse_str -> Transforme la string en tab associatif php
+    // $params stocke le tab associatif (ici ne contient que l'id du genre)
+
+    $idGenre = $params["idGenre"]; // Stocke l'id du genre récupéré de l'url
 
 
-    if (!$idGenre) {
-        echo json_encode([
-            "success" => false,
-            "message" => "ID du genre manquant"
-        ]);
-        exit;
-    }
-
-
-
-
-    // Vérifier si le genre est utilisé par des musiques avant de le supprimer
-
-    // S'il est utilisé par une musique -> message d'erreur
+    // Vérifier si le genre est utilisé par des musiques avant de le supprimer 
     if ($cgenres->isGenreUsed($idGenre)) {
-        echo json_encode([
-            "success" => false,
-            "message" => "Impossible de supprimer ce genre : utilisé par une ou plusieurs musiques"
-        ]);
+        echo json_encode(["success" => false, "message" => "Impossible de supprimer ce genre : utilisé par une ou plusieurs musiques"]);
         exit;
     }
 
-
-    // Si pas utilisé -> suppression normale
+    // On passe l'id du genre à la méthode de suppression pour le supprimer de la base
     $result = $cgenres->deleteGenre($idGenre);
+
+    // Vérifie si la suppression a réussi
     if ($result === true) {
         echo json_encode(["success" => true]);
     } else {
+
+        // Erreur -> La suppression en base a échoué (récupéré et affiché par React)
         echo json_encode(["success" => false, "message" => $result]);
     }
 
-    exit;
 }
-// FIN DELETE GENRE//

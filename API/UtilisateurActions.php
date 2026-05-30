@@ -1,9 +1,9 @@
 <?php
 
-// UtilisateurActions -> CRUD Utilisateur (pour le front-end, partie GESTION utilisateur dans l'admin) 
+// UtilisateurActions.php -> Create, Update, Delete, Patch
+// But : Faire l'action en BDD (insérer, supprimer, modifier) et prévenir React en renvoyant les données (sauf si erreur)
 
 // CORS -> Seuls ces sites ont le droit d'appeler l'API 
-
 $corsTAB = [
 
     "http://localhost:5173",
@@ -14,6 +14,7 @@ $corsTAB = [
     "https://musicvault.hugoal.fr",
 
 ];
+// Autorisation CORS : Si une des URL qui appelle l'API est dans la liste, on autorise les headers
 if (isset($_SERVER['HTTP_ORIGIN']) && in_array($_SERVER['HTTP_ORIGIN'], $corsTAB)) {
     header("Access-Control-Allow-Origin: " . $_SERVER['HTTP_ORIGIN']);
     header("Access-Control-Allow-Methods: POST, PUT, DELETE, PATCH, OPTIONS");
@@ -23,74 +24,67 @@ if (isset($_SERVER['HTTP_ORIGIN']) && in_array($_SERVER['HTTP_ORIGIN'], $corsTAB
 }
 
 
-// Preflight CORS
+// Preflight CORS -> Le navigateur envoie toujours une requête OPTIONS avant la vraie requête pour vérifier qu'il a le droit d'appeler l'API
+// On répond juste 200 OK et on coupe, le navigateur envoie ensuite la vraie requête
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
 
-
-// Classes nécessaires
+// Classes dont on a besoin
 require_once "../Classes/CDao.php";
 require_once "../Classes/ClassesControle/CUtilisateurs.php";
-require_once "auth.php"; // récupère $idUtilisateur et $idRole depuis le JWT
+require_once "auth.php"; // Fichier pour gérer l'authentification et récupérer les infos du JWT (idUtilisateur, role)
+
+
+// Initialisation des objets nécessaires pour gérer les utilisateurs
+$dao = new CDao(); // Crée la connexion à la BDD
+$cutilisateurs = CUtilisateurs::getInstance($dao); // Récupère l'instance unique de la classe CUtilisateurs (vide)
+$cutilisateurs->loadUtilisateurs(); // On charge la collection depuis la BDD (nécessaire pour vérifier qu'un utilisateur existe avant de le modifier/supprimer)
+
+// Récup des données envoyées par le body du front (pour UPDATE et CREATE)
+// Json_decode va transformer les données JSON en tab assoc php
+$data = json_decode(file_get_contents("php://input"), true);
 
 
 
-// Initialisation
-$dao = new CDao();
-$cutilisateurs = CUtilisateurs::getInstance($dao);
-$cutilisateurs->loadUtilisateurs();
 
-
-// Récupération JSON pour PUT
-$input = json_decode(file_get_contents("php://input"), true);
-
-
-
-
-// Create -> créer un utilisateur
+// METHOD POST -> Créer un nouvel utilisateur
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-
-    // Vérification du rôle admin 
+    // Vérification du rôle (seul l'admin peut créer un utilisateur)
     if ($idRole !== 1) {
         echo json_encode(["success" => false, "message" => "Accès refusé"]);
         exit;
     }
 
-    // Récupérer le JSON envoyé
-    $data = json_decode(file_get_contents("php://input"), true);
+    // Hasher le mot de passe reçu en clair depuis le front avant de l'insérer en BDD 
+    $mdpHash = password_hash($data['mdp'], PASSWORD_DEFAULT); // PASSWORD_DEFAULT -> L'algo de hachage, qui se met à jour automatiquement selon ce que PHP recommande
 
-
-    // Vérifications des champs obligatoires
-    if (empty($data['nom']) || empty($data['prenom']) || empty($data['login']) || empty($data['mdp']) || empty($data['idRole'])) {
-        http_response_code(400);
-        echo json_encode(["success" => false, "message" => "Tous les champs sont obligatoires"]);
-        exit;
-    }
-
-    // Hasher le mot de passe 
-    $mdpHash = password_hash($data['mdp'], PASSWORD_DEFAULT);
-
-    // Appel au DAO
+    // On passe en param les données récupérées par le front dans la méthode addUtilisateur
+    // La ligne insère les données qu'on lui donne dans la BDD (rôle de la méthode)
+    // On stocke tout ça dans "idUtilisateur", car la méthode addUtilisateur renvoie l'id de l'utilisateur ajouté
     $idUtilisateur = $cutilisateurs->addUtilisateur($data['nom'], $data['prenom'], $data['login'], $mdpHash, $data['idRole']);
 
-
+    // Si l'insert a réussi
     if ($idUtilisateur) {
+
+        // On renvoie un tableau associatif des données de l'utilisateur pour que React puisse l'utiliser (indispensable car quand on crée, React ne connait pas l'ID du nouvel utilisateur)
         echo json_encode([
-            "success" => true,
+            "success" => true, // Pour prévenir React que l'ajout en base a réussi
             "utilisateur" => [
-                "idUtilisateur" => $idUtilisateur,
+                "idUtilisateur" => $idUtilisateur, // Renvoie aussi l'id que React ne possède pas
                 "nom" => $data['nom'],
                 "prenom" => $data['prenom'],
                 "login" => $data['login'],
                 "idRole" => $data['idRole']
             ]
         ]);
+
+        // Erreur -> L'insertion en base a échoué (récupéré et affiché par React)
     } else {
-        echo json_encode(["success" => false, "message" => $success]);
+        echo json_encode(["success" => false, "message" => $idUtilisateur]);
         exit;
     }
 }
@@ -99,128 +93,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
 
-
-// UPDATE UTILISATEURS
+// METHOD PUT -> Modifier un utilisateur
 if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
 
-    // Vérification du rôle admin 
+    // Vérification du rôle (seul l'admin peut modifier un utilisateur)
     if ($idRole !== 1) {
         echo json_encode(["success" => false, "message" => "Accès refusé"]);
         exit;
     }
 
-    $input = json_decode(file_get_contents("php://input"), true);
+    // Va modifier cet utilisateur dans la base -> on donne en params de la fonction, les données envoyées par le front
+    // On passe également l'id pour qu'on sache de quel utilisateur on parle (prédicat dans la méthode)
+    $result = $cutilisateurs->updateUtilisateur($data['nom'], $data['prenom'], $data['login'], $data['idRole'], $data['idUtilisateur']);
 
-    // Attribuer chaque valeur à une variable
-    $idUtilisateur = $input['idUtilisateur'] ?? null;
-    $nom = $input['nom'] ?? null;
-    $prenom = $input['prenom'] ?? null;
-    $login = $input['login'] ?? null;
-    $idRoleInput = $input['idRole'] ?? null;
-
-
-    // Vérifications ???
-    if (!$idUtilisateur || !$nom || !$prenom || !$login || !$idRole) {
-        http_response_code(400);
-        echo json_encode(["success" => false, "message" => "Tous les champs sont obligatoires"]);
-        exit;
-    }
-
-    // Vérifier que l'utilisateur existe
-    $utilisateurs = $cutilisateurs->getUtilisateurs();
-    $utilisateur = null;
-    foreach ($utilisateurs as $u) {
-        if ($u->getIdUtilisateur() == $idUtilisateur) {
-            $utilisateur = $u;
-            break;
-        }
-    }
-
-
-    // Si utilisateur n'existe pas
-    if (!$utilisateur) {
-        http_response_code(404);
-        echo json_encode(["success" => false, "message" => "Utilisateur non trouvé"]);
-        exit;
-    }
-
-    // Appel direct au DAO avec les champs
-    $result = $cutilisateurs->updateUtilisateur($nom, $prenom, $login, $idRoleInput, $idUtilisateur);
-
+    // On vérifie si la modification en base a réussi
     if ($result === true) {
         echo json_encode(["success" => true]);
     } else {
+
+        // Erreur -> La modification en base a échoué (récupéré et affiché par React)
         echo json_encode(["success" => false, "message" => $result]);
+
     }
 
-    exit;
+
 }
 
 
 
 
-// ----------------------------
-// ------ METHOD DELETE ------ // A VOIR POUR RENDRE MOINS COMPLIQUEE
-// ----------------------------
+// METHOD DELETE -> Supprimer un utilisateur
 if ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
 
-    // Vérification du rôle admin 
+    // Vérification du rôle (seul l'admin peut supprimer un utilisateur)
     if ($idRole !== 1) {
         echo json_encode(["success" => false, "message" => "Accès refusé"]);
         exit;
     }
 
+    parse_str($_SERVER["QUERY_STRING"], $params); // Récupère l'ID de l'utilisateur envoyé par React dans l'URL
+    // QUERY_STRING -> C'est la partie après le "?" dans l'URL (donc idUtilisateur=5 par ex)
+    // parse_str -> Transforme la string en tab associatif php
+    // $params stocke le tab associatif (ici ne contient que l'id de l'utilisateur)
 
-    try {
-        parse_str($_SERVER["QUERY_STRING"], $params);
-        $idUtilisateur = $params['idUtilisateur'] ?? null;
+    // On passe l'id de l'utilisateur à la méthode de suppression pour le supprimer de la base
+    $result = $cutilisateurs->deleteUtilisateur($params['idUtilisateur']);
 
-        if (!$idUtilisateur) {
-            throw new Exception("ID utilisateur manquant");
-        }
+    // Vérifier si la suppression a réussi
+    if ($result === true) {
+        echo json_encode(["success" => true]);
+    } else {
 
-        $result = $cutilisateurs->deleteUtilisateur($idUtilisateur);
-
-        if ($result === true) {
-            echo json_encode(["success" => true, "message" => "Utilisateur supprimé"]);
-        } else {
-            throw new Exception($result ?? "Erreur inconnue");
-        }
-    } catch (Exception $e) {
-        http_response_code(500);
-        echo json_encode([
-            "success" => false,
-            "message" => "Erreur serveur : " . $e->getMessage()
-        ]);
+        // Erreur -> La suppression en base a échoué (récupéré et affiché par React)
+        echo json_encode(["success" => false, "message" => $result]);
     }
-
-    exit;
 }
 
 
 
-// ----------------------------
-// ------ METHOD PATCH -------- (POUR MODIFIER PARTIELLEMENT, ICI, QUE LE MDP (puis je l'ai pas utilisé encore dans le fichier, ça aurait été lourd d'avori 2 PUT))
-// ----------------------------
+
+// METHOD PATCH -> Modifier partiellement un utilisateur (ici uniquement le mot de passe)
 if ($_SERVER['REQUEST_METHOD'] === 'PATCH') {
 
-    $data = json_decode(file_get_contents("php://input"), true);
-    $nouveauMdp = $data['nouveauMdp'] ?? null;
+    // On passe l'id de l'utilisateur connecté (via JWT) et le nouveau mot de passe à la méthode
+    $result = $cutilisateurs->changerMdp($idUtilisateur, $data['nouveauMdp']);
 
-    if (!$nouveauMdp || strlen($nouveauMdp) < 8) {
-        http_response_code(400);
-        echo json_encode(["success" => false, "message" => "Mot de passe trop court (8 caractères minimum)"]);
-        exit;
-    }
-
-    $result = $cutilisateurs->changerMdp($idUtilisateur, $nouveauMdp);
-
+    // On vérifie si la modification en base a réussi
     if ($result === true) {
         echo json_encode(["success" => true, "message" => "Mot de passe changé avec succès"]);
     } else {
-        http_response_code(500);
+
+        // Erreur -> La modification en base a échoué (récupéré et affiché par React)
         echo json_encode(["success" => false, "message" => $result]);
     }
-
-    exit;
 }

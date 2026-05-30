@@ -80,7 +80,7 @@ class CMusiques
             $this->collMusiques[] = $musique;
 
 
-            return $this->pdo->lastInsertId(); // Si ajout réussi -> return l'id (si on en a besoin après l'appel de la méthode)
+            return $this->pdo->lastInsertId(); // Si ajout réussi -> return l'id 
 
             // Erreur -> Affiche un message d'erreur (au lieu de planter l'application)
         } catch (Exception $e) {

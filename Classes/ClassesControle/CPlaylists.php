@@ -83,7 +83,7 @@ class CPlaylists
             // Ajouter à la collection locale la nouvelle playlist créée
             $this->collPlaylists[] = $playlist;
 
-            return $this->pdo->lastInsertId(); // Ajout réussit -> Return l'id (si on en a besoin après l'appel de la méthode)
+            return $this->pdo->lastInsertId(); // Ajout réussit -> Return l'id 
 
             // Erreur -> Affiche un message d'erreur (au lieu de planter l'application)
         } catch (Exception $e) {
